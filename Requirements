@@ -1,0 +1,25 @@
+# Arduino-Based Temperature Monitoring System
+
+This repository contains the code and resources for an Arduino-based temperature monitoring system. The project includes scripts for reading data from the Arduino, logging data, visualizing data in real-time, and a web interface for monitoring temperature.
+
+## Introduction
+
+This project provides an easy-to-build and customizable temperature monitoring solution using Arduino and various sensors. The Python scripts included in this repository allow for serial data reading, data visualization, and web-based real-time monitoring.
+
+## Features
+
+- **Sensor Integration**: Supports multiple types of temperature sensors.
+- **Data Logging**: Logs temperature data to a file.
+- **Real-time Monitoring**: Displays temperature data in real-time using Matplotlib and a web interface.
+- **Extensibility**: Easily extendable to add new sensors or features.
+
+## Installation
+
+### Prerequisites
+
+- Arduino board with a temperature sensor
+- [Python](https://www.python.org/downloads/)
+- [Arduino IDE](https://www.arduino.cc/en/software)
+- Required Python libraries: `pyserial`, `matplotlib`, `flask`
+
+
