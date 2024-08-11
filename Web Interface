@@ -1,0 +1,44 @@
+# web_interface.py
+from flask import Flask, render_template_string
+import serial
+import threading
+
+app = Flask(__name__)
+
+# Configure the serial port and baud rate (adjust as needed)
+SERIAL_PORT = '/dev/ttyACM0'
+BAUD_RATE = 9600
+
+ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
+
+# Variable to store the current temperature reading
+current_temperature = "N/A"
+
+def read_serial():
+    global current_temperature
+    while True:
+        line = ser.readline().decode('utf-8').strip()
+        current_temperature = line
+
+# Start a separate thread to read serial data
+thread = threading.Thread(target=read_serial)
+thread.daemon = True
+thread.start()
+
+@app.route('/')
+def index():
+    return render_template_string('''
+        <html>
+            <head>
+                <title>Temperature Monitoring</title>
+                <meta http-equiv="refresh" content="1">
+            </head>
+            <body>
+                <h1>Real-time Temperature Monitoring</h1>
+                <p>Current Temperature: {{ temperature }} °C</p>
+            </body>
+        </html>
+    ''', temperature=current_temperature)
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0')
