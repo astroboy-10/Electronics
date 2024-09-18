@@ -1,0 +1,377 @@
+
+import tkinter as tk
+from tkinter import messagebox, filedialog, ttk, simpledialog
+import json
+import os
+import csv
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import pandas as pd
+import matplotlib.pyplot as plt
+import qrcode
+import shutil
+import openpyxl  # For Excel import/export
+
+class LabInventoryApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Lab Inventory Management")
+        self.root.geometry("800x600")
+        self.filename = 'lab_inventory.json'
+        self.inventory = {}
+        self.activity_log = []
+        self.load_inventory()
+
+        # Set a background color for the main window
+        self.root.configure(bg="#f0f4f8")
+
+        # Create a menu bar
+        self.menubar = tk.Menu(self.root, bg="#004d99", fg="white")
+        self.root.config(menu=self.menubar)
+
+        # Add a "File" menu
+        self.file_menu = tk.Menu(self.menubar, tearoff=0, bg="#005cbf", fg="white")
+        self.menubar.add_cascade(label="File", menu=self.file_menu)
+        self.file_menu.add_command(label="Export to CSV", command=self.export_csv)
+        self.file_menu.add_command(label="Export to PDF", command=self.export_pdf)
+        self.file_menu.add_command(label="Upload CSV", command=self.upload_csv)
+        self.file_menu.add_command(label="Upload Excel", command=self.upload_excel)
+        self.file_menu.add_command(label="Create Backup", command=self.create_backup)
+        self.file_menu.add_command(label="Restore Backup", command=self.restore_backup)
+        self.file_menu.add_separator()
+        self.file_menu.add_command(label="Exit", command=self.root.quit)
+
+        # Add an "Inventory" menu
+        self.inventory_menu = tk.Menu(self.menubar, tearoff=0, bg="#005cbf", fg="white")
+        self.menubar.add_cascade(label="Inventory", menu=self.inventory_menu)
+        self.inventory_menu.add_command(label="Add Item", command=self.add_item_menu)
+        self.inventory_menu.add_command(label="Update Item", command=self.update_item_menu)
+        self.inventory_menu.add_command(label="Delete Item", command=self.delete_item_menu)
+        self.inventory_menu.add_command(label="View Inventory", command=self.view_inventory)
+        self.inventory_menu.add_command(label="Search Item", command=self.search_item_menu)
+        self.inventory_menu.add_command(label="Show Summary", command=self.show_summary)
+        self.inventory_menu.add_command(label="Generate QR Code", command=self.generate_qr_code)
+        self.inventory_menu.add_command(label="View Activity Log", command=self.view_activity_log)
+
+        # Add a "Settings" menu
+        self.settings_menu = tk.Menu(self.menubar, tearoff=0, bg="#005cbf", fg="white")
+        self.menubar.add_cascade(label="Settings", menu=self.settings_menu)
+        self.settings_menu.add_command(label="Enable Dark Mode", command=self.enable_dark_mode)
+        self.settings_menu.add_command(label="Disable Dark Mode", command=self.disable_dark_mode)
+        self.settings_menu.add_command(label="Set Low Stock Alert", command=self.set_low_stock_alert)
+
+        # Add a "Help" menu
+        self.help_menu = tk.Menu(self.menubar, tearoff=0, bg="#005cbf", fg="white")
+        self.menubar.add_cascade(label="Help", menu=self.help_menu)
+        self.help_menu.add_command(label="Help", command=self.show_help)
+
+        # University label at the top
+        self.uni_label = tk.Label(root, text="University of Cambridge", font=("Arial", 16, "bold"), bg="#f0f4f8", fg="#004d99")
+        self.uni_label.grid(row=0, column=0, sticky="w", padx=20)
+
+        # Lab title labels at the top
+        self.title_frame = tk.Frame(root, bg="#f0f4f8")
+        self.title_frame.grid(row=1, column=0, columnspan=2, pady=10)
+
+        self.lab_name_label = tk.Label(self.title_frame, text="HEP ELECTRONICS LAB", font=("Arial", 20, "bold"), bg="#f0f4f8", fg="#004d99")
+        self.lab_name_label.pack()
+
+        self.cavendish_lab_label = tk.Label(self.title_frame, text="CAVENDISH LABORATORY", font=("Arial", 14), bg="#f0f4f8", fg="#005cbf")
+        self.cavendish_lab_label.pack()
+
+        # Search Bar
+        self.search_frame = tk.Frame(root, bg="#f0f4f8")
+        self.search_frame.grid(row=4, column=0, columnspan=2, pady=10)
+        self.search_entry = tk.Entry(self.search_frame, font=("Arial", 12), width=30)
+        self.search_entry.grid(row=0, column=0, padx=5)
+        self.search_button = tk.Button(self.search_frame, text="Search", command=self.search_item, bg="#005cbf", fg="white", font=("Arial", 12))
+        self.search_button.grid(row=0, column=1, padx=5)
+
+        # Treeview table for displaying inventory
+        self.tree = ttk.Treeview(root, columns=("Item Name", "Location", "Quantity"), show='headings', height=15)
+        self.tree.heading("Item Name", text="Item Name")
+        self.tree.heading("Location", text="Location")
+        self.tree.heading("Quantity", text="Quantity")
+        self.tree.column("Item Name", anchor="center", width=200)
+        self.tree.column("Location", anchor="center", width=200)
+        self.tree.column("Quantity", anchor="center", width=100)
+        self.tree.grid(row=5, column=0, columnspan=2, padx=20, pady=10)
+
+        # Add Scrollbar
+        self.scrollbar = ttk.Scrollbar(root, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscroll=self.scrollbar.set)
+        self.scrollbar.grid(row=5, column=2, sticky="ns")
+
+    def load_inventory(self):
+        if os.path.exists(self.filename):
+            with open(self.filename, 'r') as file:
+                self.inventory = json.load(file)
+        else:
+            self.inventory = {}
+
+    def save_inventory(self):
+        with open(self.filename, 'w') as file:
+            json.dump(self.inventory, file, indent=4)
+
+    # Export inventory to CSV
+    def export_csv(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+        if not file_path:
+            return
+        try:
+            with open(file_path, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["Item Name", "Location", "Quantity"])
+                for item_name, details in self.inventory.items():
+                    writer.writerow([item_name, details['location'], details['quantity']])
+            messagebox.showinfo("Export Successful", f"Inventory exported to {file_path}.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export CSV: {e}")
+
+    # Export inventory to PDF
+    def export_pdf(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")])
+        if not file_path:
+            return
+        try:
+            c = canvas.Canvas(file_path, pagesize=letter)
+            c.setFont("Helvetica", 12)
+            textobject = c.beginText(40, 750)
+            textobject.textLine("Lab Inventory Report")
+            textobject.textLine("University of Cambridge - HEP ELECTRONICS LAB")
+            textobject.textLine("")
+            textobject.textLine(f"{'Item Name':<20} {'Location':<20} {'Quantity':<10}")
+            textobject.textLine("-" * 60)
+            for item_name, details in self.inventory.items():
+                textobject.textLine(f"{item_name:<20} {details['location']:<20} {details['quantity']:<10}")
+            c.drawText(textobject)
+            c.showPage()
+            c.save()
+            messagebox.showinfo("Export Successful", f"Inventory exported to {file_path}.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export PDF: {e}")
+
+    # Upload CSV to update inventory
+    def upload_csv(self):
+        file_path = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if file_path:
+            try:
+                with open(file_path, mode='r') as file:
+                    csv_reader = csv.DictReader(file)
+                    headers = csv_reader.fieldnames
+                    if headers != ["Item Name", "Location", "Quantity"]:
+                        raise ValueError("Invalid CSV format. Headers must be: 'Item Name', 'Location', 'Quantity'.")
+                    for row in csv_reader:
+                        item_name = row["Item Name"]
+                        location = row["Location"]
+                        quantity = int(row["Quantity"])
+                        self.inventory[item_name] = {'location': location, 'quantity': quantity}
+                    self.save_inventory()
+                    messagebox.showinfo("Success", "Inventory updated from CSV.")
+            except ValueError as e:
+                messagebox.showerror("Error", f"CSV Error: {e}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update inventory from CSV: {e}")
+
+    # Upload Excel to update inventory
+    def upload_excel(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+        if file_path:
+            try:
+                workbook = openpyxl.load_workbook(file_path)
+                sheet = workbook.active
+                for row in sheet.iter_rows(min_row=2, values_only=True):
+                    item_name, location, quantity = row
+                    self.inventory[item_name] = {'location': location, 'quantity': int(quantity)}
+                self.save_inventory()
+                messagebox.showinfo("Success", "Inventory updated from Excel file.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to update inventory from Excel: {e}")
+
+    # Create a backup of the inventory
+    def create_backup(self):
+        backup_filename = 'lab_inventory_backup.json'
+        with open(backup_filename, 'w') as file:
+            json.dump(self.inventory, file, indent=4)
+        messagebox.showinfo("Backup Created", f"A backup has been created: {backup_filename}")
+
+    # Restore the inventory from a backup
+    def restore_backup(self):
+        backup_filename = 'lab_inventory_backup.json'
+        if os.path.exists(backup_filename):
+            with open(backup_filename, 'r') as file:
+                self.inventory = json.load(file)
+            self.save_inventory()
+            messagebox.showinfo("Restore Successful", "Inventory restored from backup.")
+        else:
+            messagebox.showerror("Error", "No backup found.")
+
+    # Search item in the inventory
+    def search_item_menu(self):
+        self.search_frame.grid(row=4, column=0, columnspan=2, pady=10)
+
+    def search_item(self):
+        query = self.search_entry.get().lower()
+        self.tree.delete(*self.tree.get_children())
+        if not query:
+            self.view_inventory()
+            return
+
+        found = False
+        for item_name, details in self.inventory.items():
+            if query in item_name.lower():
+                found = True
+                self.tree.insert("", "end", values=(item_name, details['location'], details['quantity']))
+        if not found:
+            messagebox.showinfo("Search Result", "No matching items found.")
+
+    # Show inventory summary
+    def show_summary(self):
+        if not self.inventory:
+            messagebox.showinfo("Summary", "Inventory is empty.")
+            return
+
+        total_items = len(self.inventory)
+        most_stocked = max(self.inventory.items(), key=lambda x: x[1]['quantity'])
+        least_stocked = min(self.inventory.items(), key=lambda x: x[1]['quantity'])
+
+        summary_message = (
+            f"Total unique items: {total_items}\n"
+            f"Most stocked item: {most_stocked[0]} with {most_stocked[1]['quantity']} units\n"
+            f"Least stocked item: {least_stocked[0]} with {least_stocked[1]['quantity']} units"
+        )
+
+        messagebox.showinfo("Inventory Summary", summary_message)
+
+    # View activity log
+    def view_activity_log(self):
+        if not self.activity_log:
+            messagebox.showinfo("Activity Log", "No activity recorded yet.")
+            return
+
+        log_window = tk.Toplevel(self.root)
+        log_window.title("Activity Log")
+        log_window.geometry("400x400")
+
+        log_text = tk.Text(log_window, height=20, width=50)
+        log_text.pack()
+
+        for log in self.activity_log:
+            log_text.insert(tk.END, log + "\n")
+
+    # Generate QR code for item
+    def generate_qr_code(self):
+        item_name = simpledialog.askstring("QR Code", "Enter item name to generate QR code:")
+        if item_name in self.inventory:
+            qr = qrcode.make(f"Item: {item_name}\nLocation: {self.inventory[item_name]['location']}\nQuantity: {self.inventory[item_name]['quantity']}")
+            qr_path = f"{item_name}_qr.png"
+            qr.save(qr_path)
+            messagebox.showinfo("QR Code Generated", f"QR Code saved as {qr_path}")
+        else:
+            messagebox.showerror("Error", f"Item '{item_name}' not found in inventory.")
+
+    # Enable Dark Mode
+    def enable_dark_mode(self):
+        self.root.configure(bg="#333333")
+        self.uni_label.configure(bg="#333333", fg="white")
+        self.lab_name_label.configure(bg="#333333", fg="white")
+        self.cavendish_lab_label.configure(bg="#333333", fg="white")
+        self.tree.configure(style="Treeview", background="#333333", foreground="white")
+
+    # Disable Dark Mode
+    def disable_dark_mode(self):
+        self.root.configure(bg="#f0f4f8")
+        self.uni_label.configure(bg="#f0f4f8", fg="#004d99")
+        self.lab_name_label.configure(bg="#f0f4f8", fg="#004d99")
+        self.cavendish_lab_label.configure(bg="#f0f4f8", fg="#005cbf")
+        self.tree.configure(style="Treeview", background="white", foreground="black")
+
+    # Set low stock alert
+    def set_low_stock_alert(self):
+        threshold = simpledialog.askinteger("Low Stock Alert", "Set low stock threshold:")
+        if threshold is not None:
+            for item_name, details in self.inventory.items():
+                if details['quantity'] < threshold:
+                    messagebox.showwarning("Low Stock Alert", f"Item '{item_name}' has low stock: {details['quantity']} units.")
+
+    # Add item through menu
+    def add_item_menu(self):
+        self.clear_tree_view()
+        self.show_item_entry_widgets("Add Item")
+
+    def update_item_menu(self):
+        self.clear_tree_view()
+        self.show_item_entry_widgets("Update Item")
+
+    def delete_item_menu(self):
+        self.clear_tree_view()
+        self.show_item_entry_widgets("Delete Item")
+
+    def show_item_entry_widgets(self, action):
+        item_name = simpledialog.askstring(action, f"Enter item name to {action.lower()}:")
+        location = simpledialog.askstring(action, "Enter item location:")
+        quantity = simpledialog.askinteger(action, "Enter item quantity:")
+
+        if action == "Add Item":
+            self.add_item(item_name, location, quantity)
+        elif action == "Update Item":
+            self.update_item(item_name, location, quantity)
+        elif action == "Delete Item":
+            self.delete_item(item_name)
+
+    def add_item(self, item_name, location, quantity):
+        if item_name in self.inventory:
+            messagebox.showwarning("Warning", f"Item '{item_name}' already exists.")
+        else:
+            self.inventory[item_name] = {'location': location, 'quantity': quantity}
+            self.save_inventory()
+            self.activity_log.append(f"Added item: {item_name}, Location: {location}, Quantity: {quantity}")
+            self.view_inventory()
+
+    def update_item(self, item_name, location, quantity):
+        if item_name in self.inventory:
+            self.inventory[item_name] = {'location': location, 'quantity': quantity}
+            self.save_inventory()
+            self.activity_log.append(f"Updated item: {item_name}, Location: {location}, Quantity: {quantity}")
+            self.view_inventory()
+        else:
+            messagebox.showwarning("Error", f"Item '{item_name}' not found.")
+
+    def delete_item(self, item_name):
+        if item_name in self.inventory:
+            del self.inventory[item_name]
+            self.save_inventory()
+            self.activity_log.append(f"Deleted item: {item_name}")
+            self.view_inventory()
+        else:
+            messagebox.showwarning("Error", f"Item '{item_name}' not found.")
+
+    def view_inventory(self):
+        self.tree.delete(*self.tree.get_children())
+        for item_name, details in self.inventory.items():
+            self.tree.insert("", "end", values=(item_name, details['location'], details['quantity']))
+
+    def clear_tree_view(self):
+        self.tree.delete(*self.tree.get_children())
+
+    def show_help(self):
+        help_message = (
+            "1. Add Item: Add new items to the inventory.\n"
+            "2. Update Item: Modify existing items.\n"
+            "3. Delete Item: Remove items from the inventory.\n"
+            "4. Export to CSV: Export the inventory as a CSV file.\n"
+            "5. Export to PDF: Export the inventory as a PDF file.\n"
+            "6. Upload CSV: Update inventory by uploading a CSV file.\n"
+            "7. Upload Excel: Update inventory by uploading an Excel file.\n"
+            "8. View Inventory: See the current inventory list.\n"
+            "9. Search Item: Search for specific items in the inventory.\n"
+            "10. Show Summary: Get a summary of the inventory (e.g., total items, most/least stocked item).\n"
+            "11. Generate QR Code: Generate a QR code for an item in the inventory."
+        )
+        messagebox.showinfo("Help", help_message)
+
+# Run the app
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LabInventoryApp(root)
+    root.mainloop()
